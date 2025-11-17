@@ -1,9 +1,3 @@
-local QBCore = exports['qb-core']:GetCoreObject()
-local PlayerData = {}
-local PlayerGang = {}
-local PlayerJob = {}
-local garageZones = {}
-local listenForKey = false
 
 -- Functions
 
@@ -94,86 +88,105 @@ local function CreateBlips(setloc)
     EndTextCommandSetBlipName(Garage)
 end
 
-local function CreateZone(index, garage, zoneType)
-    local zone = CircleZone:Create(garage.takeVehicle, 10.0, {
-        name = zoneType .. '_' .. index,
-        debugPoly = false,
-        useZ = true,
-        data = {
-            indexgarage = index,
-            type = garage.type,
-            category = garage.category
-        }
-    })
-
-    return zone
-end
-
 local function CreateBlipsZones()
-    PlayerData = QBCore.Functions.GetPlayerData()
-    PlayerGang = PlayerData.gang
-    PlayerJob = PlayerData.job
-
-    for index, garage in pairs(Config.Garages) do
-        local zone
-        if garage.showBlip then
-            CreateBlips(garage)
+    for garage, data in pairs(Config.Garages) do
+        if data.showBlip then
+            CreateBlips(data)
         end
-        if garage.type == 'job' and (PlayerJob.name == garage.job or PlayerJob.type == garage.jobType) then
-            zone = CreateZone(index, garage, 'job')
-        elseif garage.type == 'gang' and PlayerGang.name == garage.job then
-            zone = CreateZone(index, garage, 'gang')
-        elseif garage.type == 'depot' then
-            zone = CreateZone(index, garage, 'depot')
-        elseif garage.type == 'public' then
-            zone = CreateZone(index, garage, 'public')
-        end
-
-        if zone then
-            garageZones[#garageZones + 1] = zone
+        local options = {
+            {
+                label = 'Deposit Vehicle',
+                icon = 'car-side',
+                action = function()
+                    if data.type == 'depot' then return end
+                    local currentVehicle = GetVehiclePedIsUsing(PlayerPedId())
+                    if not IsVehicleAllowed(data.category, currentVehicle) then
+                        QBCore.Functions.Notify(Lang:t('error.not_correct_type'), 'error', 3500)
+                        return
+                    end
+                    DepositVehicle(currentVehicle, { indexgarage = garage, type = data.type, category = data.category })
+                    if not Config.UseTarget then
+                        exports['qb-interact']:showInteract()
+                    end
+                end,
+                canInteract = function()
+                    if data.type == 'depot' then
+                        return false
+                    end
+                    if GetVehiclePedIsUsing(PlayerPedId()) ~= 0 then
+                        if data.type == 'gang' then
+                            if QBCore.Functions.GetPlayerData().gang.name ~= data.job then
+                                return false
+                            end
+                            return true
+                        end
+                        if data.type == 'job' then
+                            if QBCore.Functions.GetPlayerData().job.name ~= data.job then
+                                return false
+                            end
+                            return true
+                        end
+                        return true
+                    end
+                    return false
+                end
+            },
+            {
+                label = 'Garage Menu',
+                icon = 'garage',
+                action = function()
+                    OpenGarageMenu({ indexgarage = garage, type = data.type, category = data.category })
+                    if not Config.UseTarget then
+                        exports['qb-interact']:showInteract()
+                    end
+                end,
+                canInteract = function()
+                    if GetVehiclePedIsUsing(PlayerPedId()) ~= 0 then
+                        return false
+                    end
+                    if data.type == 'depot' then
+                        return true
+                    end
+                    if data.type == 'gang' then
+                        if QBCore.Functions.GetPlayerData().gang.name ~= data.job then
+                            print('false gang')
+                        end
+                        return true
+                    end
+                    if data.type == 'job' then
+                        if QBCore.Functions.GetPlayerData().job.name ~= data.job then
+                            return false
+                        end
+                        return true
+                    end
+                    return true
+                end
+            }
+        }
+        if Config.UseTarget then
+            exports['qb-target']:AddBoxZone(garage, data.takeVehicle, 3, 3, {
+                name = garage,
+                heading = data.heading or 0,
+                debugPoly = false,
+                minZ = data.takeVehicle.z - 2,
+                maxZ = data.takeVehicle.z + 2,
+            }, {
+                options = options,
+                distance = 3.5,
+            })
+        else
+            exports['qb-interact']:addInteractZone({
+                name = garage,
+                coords = data.takeVehicle,
+                height = 4.0,
+                width = 3.0,
+                length = 3.0,
+                heading = data.heading or 180.0,
+                options = options,
+                debugPoly = false,
+            })
         end
     end
-
-    local comboZone = ComboZone:Create(garageZones, { name = 'garageCombo', debugPoly = false })
-
-    comboZone:onPlayerInOut(function(isPointInside, _, zone)
-        if isPointInside then
-            listenForKey = true
-            CreateThread(function()
-                while listenForKey do
-                    Wait(0)
-                    if IsControlJustReleased(0, 38) then
-                        if GetVehiclePedIsUsing(PlayerPedId()) ~= 0 then
-                            if zone.data.type == 'depot' then return end
-                            local currentVehicle = GetVehiclePedIsUsing(PlayerPedId())
-                            if not IsVehicleAllowed(zone.data.category, currentVehicle) then
-                                QBCore.Functions.Notify(Lang:t('error.not_correct_type'), 'error', 3500)
-                                return
-                            end
-                            DepositVehicle(currentVehicle, zone.data)
-                        else
-                            OpenGarageMenu(zone.data)
-                        end
-                    end
-                end
-            end)
-
-            local displayText = Lang:t('info.car_e')
-            if zone.data.vehicle == 'sea' then
-                displayText = Lang:t('info.sea_e')
-            elseif zone.data.vehicle == 'air' then
-                displayText = Lang:t('info.air_e')
-            elseif zone.data.vehicle == 'rig' then
-                displayText = Lang:t('info.rig_e')
-            elseif zone.data.type == 'depot' then
-                displayText = Lang:t('info.depot_e')
-            end
-            exports['qb-core']:DrawText(displayText, 'left')
-        else
-            listenForKey = false
-            exports['qb-core']:HideText()
-        end
-    end)
 end
 
 local function doCarDamage(currentVehicle, stats, props)
@@ -308,53 +321,72 @@ end)
 -- Housing calls
 
 local houseGarageZones = {}
-local listenForKeyHouse = false
-local houseComboZones = nil
 
 local function CreateHouseZone(index, garage, zoneType)
-    local houseZone = CircleZone:Create(garage.takeVehicle, 5.0, {
-        name = zoneType .. '_' .. index,
-        debugPoly = false,
-        useZ = true,
-        data = {
-            indexgarage = index,
-            type = zoneType,
-            category = garage.category
-        }
-    })
+    local zoneData = {
+        indexgarage = index,
+        type = zoneType,
+        category = garage.category
+    }
 
-    if houseZone then
-        houseGarageZones[#houseGarageZones + 1] = houseZone
-
-        if not houseComboZones then
-            houseComboZones = ComboZone:Create(houseGarageZones, { name = 'houseComboZones', debugPoly = false })
-        else
-            houseComboZones:AddZone(houseZone)
-        end
-    end
-
-    houseComboZones:onPlayerInOut(function(isPointInside, _, zone)
-        if isPointInside then
-            listenForKeyHouse = true
-            CreateThread(function()
-                while listenForKeyHouse do
-                    Wait(0)
-                    if IsControlJustReleased(0, 38) then
-                        if GetVehiclePedIsUsing(PlayerPedId()) ~= 0 then
-                            local currentVehicle = GetVehiclePedIsUsing(PlayerPedId())
-                            DepositVehicle(currentVehicle, zone.data)
-                        else
-                            OpenGarageMenu(zone.data)
-                        end
-                    end
+    local options = {
+        {
+            label = 'Deposit Vehicle',
+            icon = 'car-side',
+            action = function()
+                if GetVehiclePedIsUsing(PlayerPedId()) ~= 0 then
+                    local currentVehicle = GetVehiclePedIsUsing(PlayerPedId())
+                    DepositVehicle(currentVehicle, zoneData)
+                else
+                    OpenGarageMenu(zoneData)
                 end
-            end)
-            exports['qb-core']:DrawText(Lang:t('info.house_garage'), 'left')
-        else
-            listenForKeyHouse = false
-            exports['qb-core']:HideText()
-        end
-    end)
+            end,
+            canInteract = function()
+                if GetVehiclePedIsUsing(PlayerPedId()) ~= 0 then
+                    return true
+                end
+                return false
+            end
+        },
+        {
+            label = 'Garage Menu',
+            icon = 'garage',
+            action = function()
+                OpenGarageMenu(zoneData)
+            end,
+            canInteract = function()
+                if GetVehiclePedIsUsing(PlayerPedId()) == 0 then
+                    return true
+                end
+                return false
+            end
+        }
+    }
+    if Config.UseTarget then
+        exports['qb-target']:AddBoxZone('house_' .. index, garage.takeVehicle, 3, 3, {
+            name = 'house_' .. index,
+            heading = garage.heading or 0,
+            debugPoly = false,
+            minZ = garage.takeVehicle.z - 2,
+            maxZ = garage.takeVehicle.z + 2,
+        }, {
+            options = options,
+            distance = 3.5,
+        })
+        table.insert(houseGarageZones, {name = 'house_' .. index })
+    else
+        exports['qb-interact']:addInteractZone({
+            name = 'house_' .. index,
+            coords = garage.takeVehicle,
+            height = 4.0,
+            width = 3.0,
+            length = 3.0,
+            heading = garage.heading or 180.0,
+            options = options,
+            debugPoly = false,
+        })
+        table.insert(houseGarageZones, { name = 'house_' .. index })
+    end
 end
 
 local function ZoneExists(zoneName)
@@ -367,15 +399,10 @@ local function ZoneExists(zoneName)
 end
 
 local function RemoveHouseZone(zoneName)
-    local removedZone = houseComboZones:RemoveZone(zoneName)
-    if removedZone then
-        removedZone:destroy()
-    end
-    for index, zone in ipairs(houseGarageZones) do
-        if zone.name == zoneName then
-            table.remove(houseGarageZones, index)
-            break
-        end
+    if Config.UseTarget then
+        exports['qb-target']:RemoveZone(zoneName)
+    else
+        exports['qb-interact']:removeInteractZones(zoneName)
     end
 end
 
@@ -451,12 +478,4 @@ end)
 AddEventHandler('onResourceStart', function(res)
     if res ~= GetCurrentResourceName() then return end
     CreateBlipsZones()
-end)
-
-RegisterNetEvent('QBCore:Client:OnGangUpdate', function(gang)
-    PlayerGang = gang
-end)
-
-RegisterNetEvent('QBCore:Client:OnJobUpdate', function(job)
-    PlayerJob = job
 end)
